@@ -1,0 +1,123 @@
+# GitHub Sentinel 配置文件示例
+# 
+# 使用说明：
+# 1. 复制此文件为 config.yaml: cp config.example.yaml config.yaml
+# 2. 根据您的环境修改相应配置
+# 3. 确保不要将包含真实密钥的 config.yaml 提交到版本控制
+#
+# 安全提示：
+# - 所有包含 "your_" 前缀的值都需要替换为实际值
+# - GitHub Token 需要有 repo 权限
+# - 邮件密码建议使用应用专用密码而非账户密码
+
+# 应用基础配置
+app_name: "GitHub Sentinel"
+app_version: "0.1.0"
+debug: false  # 生产环境请设置为 false
+
+# 数据库配置
+database:
+  # SQLite 配置（推荐用于开发和小型部署）
+  url: "sqlite+aiosqlite:///./github_sentinel.db"
+  
+  # PostgreSQL 配置（推荐用于生产环境）
+  # url: "postgresql+asyncpg://username:password@localhost:5432/github_sentinel"
+  
+  echo: false  # 设置为 true 可以看到 SQL 查询日志
+  pool_size: 5
+  max_overflow: 10
+
+# Redis 配置（可选，用于缓存和会话存储）
+redis:
+  host: "localhost"
+  port: 6379
+  password: null  # 如果 Redis 设置了密码，请在此填写
+  db: 0
+  enabled: false  # 设置为 true 启用 Redis
+
+# GitHub API 配置
+github:
+  # GitHub Personal Access Token（必需）
+  # 获取方式：GitHub Settings > Developer settings > Personal access tokens > Tokens (classic)
+  # 需要权限：repo, read:user, read:org
+  token: "your_github_token_here"
+  
+  api_url: "https://api.github.com"
+  max_requests_per_hour: 5000  # GitHub API 限制
+  retry_attempts: 3
+  retry_delay: 60  # 重试延迟（秒）
+
+# AI 服务配置（可选，用于智能分析）
+ai:
+  # AI 服务提供商：openai 或 ollama
+  provider: "openai"
+  
+  # OpenAI 配置
+  openai_api_key: "your_openai_api_key_here"  # 从 https://platform.openai.com/api-keys 获取
+  openai_model: "gpt-3.5-turbo"  # 可选：gpt-4, gpt-3.5-turbo
+  
+  # Ollama 配置（本地部署 AI）
+  ollama_url: "http://localhost:11434"
+  ollama_model: "llama2"
+  
+  # 生成参数
+  max_tokens: 1000
+  temperature: 0.7
+
+# 任务调度配置
+schedule:
+  enabled: true
+  
+  # 每日执行时间（24小时制）
+  daily_time: "08:00"
+  
+  # 每周执行（1=周一，7=周日）
+  weekly_day: 1
+  weekly_time: "08:00"
+  
+  # 时区设置
+  timezone: "Asia/Shanghai"  # 可选：UTC, America/New_York, Europe/London 等
+
+# 通知配置
+notification:
+  enabled: true
+  
+  # 邮件通知配置
+  email_enabled: false
+  email_smtp_host: "smtp.gmail.com"  # Gmail: smtp.gmail.com, QQ: smtp.qq.com, 163: smtp.163.com
+  email_smtp_port: 587  # 通常为 587 (TLS) 或 465 (SSL)
+  email_username: "your_email@gmail.com"
+  email_password: "your_app_password"  # 建议使用应用专用密码
+  email_from: "your_email@gmail.com"
+  email_to:
+    - "recipient1@example.com"
+    - "recipient2@example.com"
+  
+  # Slack 通知配置
+  slack_enabled: false
+  slack_webhook_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+  slack_channel: "#general"
+  
+  # 自定义 Webhook 通知
+  webhook_enabled: false
+  webhook_urls:
+    - "https://your-webhook-endpoint.com/github-sentinel"
+
+# 日志配置
+log_level: "INFO"  # 可选：DEBUG, INFO, WARNING, ERROR, CRITICAL
+log_file: "logs/github_sentinel.log"
+
+# 安全配置
+secret_key: "your-super-secret-key-change-this-in-production"  # 请使用随机生成的密钥
+access_token_expire_minutes: 30  # JWT Token 过期时间（分钟）
+
+# Web 服务配置
+web:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false  # 开发环境可设置为 true
+
+# 前端配置
+frontend:
+  url: "http://localhost:5173"  # 前端服务地址
+  build_path: "frontend/dist"   # 前端构建文件路径 
