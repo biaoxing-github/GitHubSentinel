@@ -3,18 +3,16 @@
 支持HTML邮件发送和模板渲染
 """
 
+import asyncio
 import smtplib
 import ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email import encoders
-from typing import List, Optional, Dict, Any
-from datetime import datetime
-import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from typing import List, Optional, Dict, Any
 
-from app.core.config import get_config
+from app.core.config import get_settings
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -24,22 +22,32 @@ class EmailNotifier:
     """邮件通知器"""
     
     def __init__(self):
-        self.config = get_config()
-        self.notification_config = self.config.notification
+        self.settings = get_settings()
+        self.notification_config = self.settings.notification
         self.executor = ThreadPoolExecutor(max_workers=2)
     
     def _create_smtp_connection(self) -> smtplib.SMTP:
         """创建SMTP连接"""
         try:
+            logger.info(f"📧 尝试连接SMTP服务器: {self.notification_config.email_smtp_host}:{self.notification_config.email_smtp_port}")
+            
             # 创建SMTP连接
             server = smtplib.SMTP(
                 self.notification_config.email_smtp_host,
-                self.notification_config.email_smtp_port
+                self.notification_config.email_smtp_port,
+                timeout=30  # 添加超时设置
             )
+            
+            # 设置调试级别（可选）
+            # server.set_debuglevel(1)
+            
+            logger.info("📧 SMTP连接建立成功，开始TLS握手")
             
             # 启用TLS加密
             context = ssl.create_default_context()
             server.starttls(context=context)
+            
+            logger.info("📧 TLS握手成功，开始认证")
             
             # 登录
             server.login(
@@ -47,11 +55,20 @@ class EmailNotifier:
                 self.notification_config.email_password
             )
             
-            logger.info(f"SMTP连接成功: {self.notification_config.email_smtp_host}")
+            logger.info(f"✅ SMTP连接和认证成功: {self.notification_config.email_smtp_host}")
             return server
             
+        except smtplib.SMTPAuthenticationError as e:
+            logger.error(f"📧 SMTP认证失败: {str(e)} - 用户名: {self.notification_config.email_username}")
+            raise
+        except smtplib.SMTPConnectError as e:
+            logger.error(f"📧 SMTP连接失败: {str(e)} - 服务器: {self.notification_config.email_smtp_host}:{self.notification_config.email_smtp_port}")
+            raise
+        except smtplib.SMTPServerDisconnected as e:
+            logger.error(f"📧 SMTP服务器断开连接: {str(e)}")
+            raise
         except Exception as e:
-            logger.error(f"SMTP连接失败: {str(e)}")
+            logger.error(f"📧 SMTP连接创建失败: {str(e)} - 类型: {type(e).__name__}")
             raise
     
     def _create_message(
@@ -89,17 +106,26 @@ class EmailNotifier:
         try:
             # 检查配置
             if not self.notification_config.email_enabled:
-                logger.warning("邮件通知未启用")
+                logger.warning("📧 邮件通知未启用，跳过发送")
                 return False
             
-            if not all([
-                self.notification_config.email_smtp_host,
-                self.notification_config.email_username,
-                self.notification_config.email_password,
-                self.notification_config.email_from
-            ]):
-                logger.error("邮件配置不完整")
+            # 详细的配置检查
+            missing_configs = []
+            if not self.notification_config.email_smtp_host:
+                missing_configs.append("SMTP主机")
+            if not self.notification_config.email_username:
+                missing_configs.append("用户名")
+            if not self.notification_config.email_password:
+                missing_configs.append("密码")
+            if not self.notification_config.email_from:
+                missing_configs.append("发件人地址")
+            
+            if missing_configs:
+                logger.error(f"📧 邮件配置不完整，缺少: {', '.join(missing_configs)}")
                 return False
+            
+            logger.info(f"📧 开始发送邮件: {subject} -> {', '.join(to_emails)}")
+            logger.info(f"📧 SMTP配置: {self.notification_config.email_smtp_host}:{self.notification_config.email_smtp_port}")
             
             # 创建邮件消息
             message = self._create_message(to_emails, subject, html_content, text_content)
@@ -108,11 +134,20 @@ class EmailNotifier:
             with self._create_smtp_connection() as server:
                 server.send_message(message)
             
-            logger.info(f"邮件发送成功: {subject} -> {', '.join(to_emails)}")
+            logger.info(f"✅ 邮件发送成功: {subject} -> {', '.join(to_emails)}")
             return True
             
+        except smtplib.SMTPAuthenticationError as e:
+            logger.error(f"📧 SMTP认证失败: {str(e)} - 请检查用户名和密码")
+            return False
+        except smtplib.SMTPConnectError as e:
+            logger.error(f"📧 SMTP连接失败: {str(e)} - 请检查主机和端口")
+            return False
+        except smtplib.SMTPException as e:
+            logger.error(f"📧 SMTP错误: {str(e)}")
+            return False
         except Exception as e:
-            logger.error(f"邮件发送失败: {str(e)}")
+            logger.error(f"📧 邮件发送失败: {str(e)}")
             return False
     
     async def send_email(
@@ -142,107 +177,144 @@ class EmailNotifier:
             <meta charset="utf-8">
             <title>GitHub Sentinel 报告</title>
             <style>
-                body {
+                body {{
                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                     line-height: 1.6;
                     color: #333;
                     max-width: 800px;
                     margin: 0 auto;
                     padding: 20px;
-                }
-                .header {
+                    background: #f8f9fa;
+                }}
+                .header {{
                     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                     color: white;
                     padding: 30px;
                     border-radius: 10px;
                     text-align: center;
                     margin-bottom: 30px;
-                }
-                .header h1 {
-                    margin: 0;
-                    font-size: 28px;
-                }
-                .header p {
-                    margin: 10px 0 0 0;
-                    opacity: 0.9;
-                }
-                .repo-section {
-                    background: #f8f9fa;
-                    border-left: 4px solid #007bff;
-                    padding: 20px;
-                    margin-bottom: 20px;
-                    border-radius: 5px;
-                }
-                .repo-title {
-                    font-size: 20px;
-                    font-weight: bold;
-                    color: #007bff;
-                    margin-bottom: 10px;
-                }
-                .activity-item {
+                    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                }}
+                .section {{
                     background: white;
-                    padding: 15px;
-                    margin: 10px 0;
-                    border-radius: 5px;
-                    border: 1px solid #e9ecef;
-                }
-                .activity-type {
-                    display: inline-block;
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    font-size: 12px;
-                    font-weight: bold;
-                    text-transform: uppercase;
-                }
-                .type-commit { background: #28a745; color: white; }
-                .type-issue { background: #ffc107; color: #212529; }
-                .type-pr { background: #17a2b8; color: white; }
-                .type-release { background: #dc3545; color: white; }
-                .footer {
-                    text-align: center;
-                    margin-top: 40px;
-                    padding: 20px;
-                    background: #f8f9fa;
-                    border-radius: 5px;
-                    color: #6c757d;
-                }
-                .stats {
-                    display: flex;
-                    justify-content: space-around;
+                    padding: 25px;
+                    border-radius: 8px;
+                    margin-bottom: 20px;
+                    border-left: 4px solid #007bff;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }}
+                .ai-section {{
+                    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+                    color: white;
+                    padding: 25px;
+                    border-radius: 8px;
+                    margin-bottom: 20px;
+                    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                }}
+                .stats {{
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                    gap: 15px;
                     margin: 20px 0;
-                }
-                .stat-item {
+                }}
+                .stat-card {{
+                    background: #f8f9fa;
+                    padding: 20px;
+                    border-radius: 8px;
                     text-align: center;
-                }
-                .stat-number {
-                    font-size: 24px;
+                    border: 1px solid #e9ecef;
+                    transition: transform 0.2s;
+                }}
+                .stat-card:hover {{
+                    transform: translateY(-2px);
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+                }}
+                .stat-number {{
+                    font-size: 28px;
                     font-weight: bold;
                     color: #007bff;
-                }
-                .stat-label {
+                    margin-bottom: 5px;
+                }}
+                .stat-label {{
+                    font-size: 14px;
+                    color: #666;
+                    font-weight: 500;
+                }}
+                .activity-item {{
+                    background: #f8f9fa;
+                    padding: 15px;
+                    border-radius: 6px;
+                    margin-bottom: 10px;
+                    border-left: 3px solid #28a745;
+                    transition: background 0.2s;
+                }}
+                .activity-item:hover {{
+                    background: #e9ecef;
+                }}
+                .activity-title {{
+                    font-weight: 600;
+                    margin-bottom: 5px;
+                    color: #495057;
+                }}
+                .activity-meta {{
                     font-size: 14px;
                     color: #6c757d;
-                }
+                }}
+                .footer {{
+                    text-align: center;
+                    color: #666;
+                    font-size: 14px;
+                    margin-top: 30px;
+                    padding-top: 20px;
+                    border-top: 1px solid #e9ecef;
+                }}
+                .ai-badge {{
+                    display: inline-block;
+                    background: rgba(255,255,255,0.2);
+                    padding: 4px 8px;
+                    border-radius: 12px;
+                    font-size: 12px;
+                    margin-left: 8px;
+                }}
+                h2 {{
+                    color: #495057;
+                    border-bottom: 2px solid #e9ecef;
+                    padding-bottom: 10px;
+                }}
+                .repo-title {{
+                    font-size: 20px;
+                    font-weight: bold;
+                    color: #495057;
+                    margin-bottom: 15px;
+                }}
             </style>
         </head>
         <body>
             <div class="header">
                 <h1>📊 GitHub Sentinel 报告</h1>
-                <p>{report_type} - {date}</p>
+                <p>📅 {report_type} - {date}</p>
+                <p>🕒 生成时间: {generated_at}</p>
             </div>
             
-            <div class="stats">
-                <div class="stat-item">
-                    <div class="stat-number">{total_repositories}</div>
-                    <div class="stat-label">监控仓库</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-number">{total_activities}</div>
-                    <div class="stat-label">总活动数</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-number">{total_commits}</div>
-                    <div class="stat-label">提交数</div>
+            <div class="section">
+                <h2>📊 统计概览</h2>
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="stat-number">{total_repositories}</div>
+                        <div class="stat-label">🏠 监控仓库</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">{total_activities}</div>
+                        <div class="stat-label">📈 总活动数</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">{total_commits}</div>
+                        <div class="stat-label">💻 提交数</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">{total_issues}</div>
+                        <div class="stat-label">🐛 Issues</div>
+                    </div>
                 </div>
             </div>
             
@@ -250,7 +322,7 @@ class EmailNotifier:
             
             <div class="footer">
                 <p>此报告由 GitHub Sentinel 自动生成</p>
-                <p>生成时间: {generated_at}</p>
+                <p>如有问题，请联系系统管理员</p>
             </div>
         </body>
         </html>
@@ -260,25 +332,37 @@ class EmailNotifier:
         repositories_content = ""
         for repo in report_data.get('repositories', []):
             repo_html = f"""
-            <div class="repo-section">
+            <div class="section">
                 <div class="repo-title">📁 {repo['name']}</div>
                 <p><strong>活动摘要:</strong> {repo.get('summary', '暂无摘要')}</p>
             """
             
             # 添加活动列表
-            for activity in repo.get('activities', []):
-                activity_type_class = f"type-{activity.get('type', 'other').lower()}"
-                repo_html += f"""
-                <div class="activity-item">
-                    <span class="activity-type {activity_type_class}">{activity.get('type', 'OTHER')}</span>
-                    <strong>{activity.get('title', '无标题')}</strong>
-                    <p>{activity.get('description', '无描述')}</p>
-                    <small>👤 {activity.get('author', '未知')} • 🕒 {activity.get('created_at', '未知时间')}</small>
-                </div>
-                """
+            if repo.get('activities'):
+                repo_html += "<h3>📋 最近活动</h3>"
+                for activity in repo.get('activities', []):
+                    activity_type_emoji = {
+                        'commit': '💻',
+                        'issue': '🐛', 
+                        'pull_request': '🔀',
+                        'release': '🚀'
+                    }.get(activity.get('type', '').lower(), '📝')
+                    
+                    repo_html += f"""
+                    <div class="activity-item">
+                        <div class="activity-title">{activity_type_emoji} {activity.get('title', '无标题')}</div>
+                        <div class="activity-meta">
+                            👤 {activity.get('author', '未知')} • 🕒 {activity.get('created_at', '未知时间')}
+                        </div>
+                        {f'<p style="margin-top: 8px; color: #666;">{activity.get("description", "")}</p>' if activity.get('description') else ''}
+                    </div>
+                    """
             
             repo_html += "</div>"
             repositories_content += repo_html
+        
+        # 计算统计数据
+        total_issues = sum(len([a for a in repo.get('activities', []) if a.get('type') == 'issue']) for repo in report_data.get('repositories', []))
         
         # 填充模板
         return html_template.format(
@@ -287,6 +371,7 @@ class EmailNotifier:
             total_repositories=len(report_data.get('repositories', [])),
             total_activities=sum(len(repo.get('activities', [])) for repo in report_data.get('repositories', [])),
             total_commits=sum(len([a for a in repo.get('activities', []) if a.get('type') == 'commit']) for repo in report_data.get('repositories', [])),
+            total_issues=total_issues,
             repositories_content=repositories_content,
             generated_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         )

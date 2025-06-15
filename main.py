@@ -109,12 +109,22 @@ def create_app() -> FastAPI:
         await scheduler.start()
         logger.info("任务调度器启动完成")
         
+        # 启动数据收集定时任务
+        from app.services.scheduler_service import scheduler_service
+        await scheduler_service.start_scheduler()
+        logger.info("数据收集定时任务启动完成")
+        
         logger.info("GitHub Sentinel 启动完成！")
     
     # 应用关闭事件
     @app.on_event("shutdown")
     async def shutdown_event():
         logger.info("GitHub Sentinel 正在关闭...")
+        
+        # 停止数据收集定时任务
+        from app.services.scheduler_service import scheduler_service
+        await scheduler_service.stop_scheduler()
+        logger.info("数据收集定时任务已停止")
         
         # 停止任务调度器
         scheduler = TaskScheduler()

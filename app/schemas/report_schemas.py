@@ -31,6 +31,7 @@ class ReportResponse(ReportBase):
     id: int = Field(..., description="报告ID")
     user_id: int = Field(..., description="用户ID")
     description: Optional[str] = Field(None, description="报告描述")
+    repository: Optional[str] = Field(None, description="关联的仓库名称")
     status: str = Field(..., description="报告状态")
     format: str = Field(..., description="报告格式")
     period_start: datetime = Field(..., description="报告开始时间")

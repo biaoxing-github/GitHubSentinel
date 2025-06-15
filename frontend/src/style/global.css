@@ -1,0 +1,446 @@
+/* Geek风格全局样式 */
+:root {
+  --primary-color: #00ff41;
+  --primary-dark: #00cc33;
+  --secondary-color: #0a0a0a;
+  --accent-color: #ff6b35;
+  --success-color: #00ff41;
+  --warning-color: #ffaa00;
+  --danger-color: #ff3366;
+  --info-color: #00ccff;
+  --dark-color: #0a0a0a;
+  --light-color: #1a1a1a;
+  --text-primary: #00ff41;
+  --text-secondary: #66ff66;
+  --text-muted: #888888;
+  --border-color: #333333;
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #1a1a1a;
+  --bg-tertiary: #2a2a2a;
+  --border-radius: 4px;
+  --box-shadow: 0 0 20px rgba(0, 255, 65, 0.2);
+  --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --font-mono: 'Fira Code', 'Monaco', 'Consolas', 'Ubuntu Mono', monospace;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-mono);
+  background: var(--bg-primary);
+  background-image: 
+    radial-gradient(circle at 20% 80%, rgba(0, 255, 65, 0.1) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(255, 107, 53, 0.1) 0%, transparent 50%),
+    linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+  min-height: 100vh;
+  color: var(--text-primary);
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* 终端风格滚动条 */
+::-webkit-scrollbar {
+  width: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--primary-color);
+  border-radius: 2px;
+  box-shadow: inset 0 0 5px rgba(0, 255, 65, 0.5);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--primary-dark);
+}
+
+/* 卡片样式 - 终端风格 */
+.card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  box-shadow: var(--box-shadow);
+  transition: var(--transition);
+  position: relative;
+  overflow: hidden;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
+  opacity: 0;
+  transition: var(--transition);
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 30px rgba(0, 255, 65, 0.3);
+  border-color: var(--primary-color);
+}
+
+.card:hover::before {
+  opacity: 1;
+}
+
+/* 按钮样式 - 终端风格 */
+.btn-primary {
+  background: transparent;
+  border: 2px solid var(--primary-color);
+  color: var(--primary-color);
+  border-radius: var(--border-radius);
+  padding: 10px 20px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  transition: var(--transition);
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-color);
+  transition: var(--transition);
+  z-index: -1;
+}
+
+.btn-primary:hover {
+  color: var(--bg-primary);
+  box-shadow: 0 0 20px rgba(0, 255, 65, 0.5);
+}
+
+.btn-primary:hover::before {
+  left: 0;
+}
+
+/* 表格样式 - 矩阵风格 */
+.el-table {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  overflow: hidden;
+  font-family: var(--font-mono);
+}
+
+.el-table th {
+  background: var(--bg-tertiary);
+  color: var(--primary-color);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border-bottom: 2px solid var(--primary-color);
+}
+
+.el-table td {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.el-table tr:hover td {
+  background: rgba(0, 255, 65, 0.1);
+  color: var(--primary-color);
+}
+
+/* 表单样式 - 终端输入框 */
+.el-input__wrapper {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  transition: var(--transition);
+}
+
+.el-input__wrapper:hover {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 10px rgba(0, 255, 65, 0.2);
+}
+
+.el-input__wrapper.is-focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 15px rgba(0, 255, 65, 0.3);
+}
+
+.el-input__inner {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+/* 标签样式 - 芯片风格 */
+.el-tag {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--primary-color);
+  color: var(--primary-color);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.el-tag.el-tag--success {
+  border-color: var(--success-color);
+  color: var(--success-color);
+}
+
+.el-tag.el-tag--warning {
+  border-color: var(--warning-color);
+  color: var(--warning-color);
+}
+
+.el-tag.el-tag--danger {
+  border-color: var(--danger-color);
+  color: var(--danger-color);
+}
+
+/* 页面容器 */
+.page-container {
+  padding: 20px;
+  max-width: 1400px;
+  margin: 0 auto;
+  position: relative;
+}
+
+/* 页面标题 - 终端风格 */
+.page-title {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--primary-color);
+  margin-bottom: 20px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  position: relative;
+  display: inline-block;
+}
+
+.page-title::after {
+  content: '_';
+  animation: blink 1s infinite;
+  color: var(--primary-color);
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+/* 统计卡片 - 数据面板风格 */
+.stats-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 20px;
+  text-align: center;
+  box-shadow: var(--box-shadow);
+  transition: var(--transition);
+  position: relative;
+  overflow: hidden;
+}
+
+.stats-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--primary-color);
+  box-shadow: 0 0 10px var(--primary-color);
+}
+
+.stats-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 0 25px rgba(0, 255, 65, 0.4);
+  border-color: var(--primary-color);
+}
+
+.stats-number {
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--primary-color);
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  text-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
+}
+
+.stats-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-family: var(--font-mono);
+}
+
+/* 加载动画 - 矩阵风格 */
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 200px;
+  flex-direction: column;
+}
+
+.loading-text {
+  color: var(--primary-color);
+  font-family: var(--font-mono);
+  margin-top: 20px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/* 空状态 - 终端风格 */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.empty-state .el-icon {
+  font-size: 64px;
+  color: var(--border-color);
+  margin-bottom: 16px;
+}
+
+/* 导航栏样式 */
+.el-menu {
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+}
+
+.el-menu-item {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  transition: var(--transition);
+}
+
+.el-menu-item:hover,
+.el-menu-item.is-active {
+  background: rgba(0, 255, 65, 0.1);
+  color: var(--primary-color);
+  border-right: 3px solid var(--primary-color);
+}
+
+/* 对话框样式 */
+.el-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  box-shadow: 0 0 50px rgba(0, 255, 65, 0.3);
+}
+
+.el-dialog__header {
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  padding: 20px;
+}
+
+.el-dialog__title {
+  color: var(--primary-color);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* 消息提示样式 */
+.el-message {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  box-shadow: 0 0 20px rgba(0, 255, 65, 0.3);
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .page-container {
+    padding: 10px;
+  }
+  
+  .page-title {
+    font-size: 24px;
+  }
+  
+  .stats-card {
+    margin-bottom: 16px;
+  }
+}
+
+/* 特殊效果 */
+.matrix-bg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.1;
+}
+
+/* 代码块样式 */
+pre, code {
+  font-family: var(--font-mono);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  color: var(--primary-color);
+}
+
+/* 链接样式 */
+a {
+  color: var(--primary-color);
+  text-decoration: none;
+  transition: var(--transition);
+}
+
+a:hover {
+  color: var(--accent-color);
+  text-shadow: 0 0 5px rgba(0, 255, 65, 0.5);
+}
+
+/* 选择框样式 */
+.el-select .el-input__wrapper {
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+}
+
+.el-select-dropdown {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 0 20px rgba(0, 255, 65, 0.3);
+}
+
+.el-select-dropdown__item {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.el-select-dropdown__item:hover {
+  background: rgba(0, 255, 65, 0.1);
+  color: var(--primary-color);
+} 

@@ -10,10 +10,11 @@ from typing import Dict, List, Any, Optional
 
 import httpx
 from loguru import logger
+from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.database import get_db_session
-from app.models.subscription import Subscription, RepositoryActivity
+from app.models.subscription import Subscription, RepositoryActivity, SubscriptionStatus, ReportFrequency
 from app.models.report import Report, ReportStatus, ReportType
 
 
@@ -35,10 +36,22 @@ class GitHubCollector:
 
     def _parse_github_datetime(self, date_string: str) -> datetime:
         """解析GitHub API返回的时间字符串"""
-        if date_string.endswith('Z'):
-            return datetime.fromisoformat(date_string.replace('Z', '+00:00'))
-        else:
-            return datetime.fromisoformat(date_string)
+        if not date_string:
+            return None
+            
+        try:
+            if date_string.endswith('Z'):
+                # GitHub API返回的UTC时间格式
+                return datetime.fromisoformat(date_string.replace('Z', '+00:00'))
+            else:
+                return datetime.fromisoformat(date_string)
+        except ValueError:
+            # 如果解析失败，尝试其他格式
+            try:
+                return datetime.strptime(date_string, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+            except ValueError:
+                logger.warning(f"无法解析时间字符串: {date_string}")
+                return None
         
     async def collect_repository_data(self, owner: str, repo: str) -> Dict[str, Any]:
         """收集单个仓库的完整数据"""
@@ -81,7 +94,7 @@ class GitHubCollector:
                 return collected_data
                 
         except Exception as e:
-            logger.error(f"收集仓库数据失败 {owner}/{repo}: {e}")
+            logger.error(f"收集仓库数据失败 {owner}/{repo}: {e}", exc_info=True)
             raise
             
     async def _get_repository_info(self, client: httpx.AsyncClient, owner: str, repo: str) -> Dict[str, Any]:
@@ -161,16 +174,19 @@ class GitHubCollector:
             issues.append({
                 "number": issue_data["number"],
                 "title": issue_data["title"],
-                "body": issue_data.get("body", "")[:500],
+                "body": (issue_data.get("body") or "")[:1000],  # 限制长度
                 "state": issue_data["state"],
                 "user": {
-                    "login": issue_data["user"]["login"],
-                    "avatar_url": issue_data["user"]["avatar_url"]
+                    "login": issue_data.get("user", {}).get("login", "unknown") if issue_data.get("user") else "unknown",
+                    "avatar_url": issue_data.get("user", {}).get("avatar_url", "") if issue_data.get("user") else ""
                 },
                 "labels": [label["name"] for label in issue_data.get("labels", [])],
-                "comments": issue_data["comments"],
+                "assignees": [assignee["login"] for assignee in issue_data.get("assignees", [])],
+                "milestone": issue_data.get("milestone", {}).get("title", "") if issue_data.get("milestone") else "",
+                "comments": issue_data.get("comments", 0),
                 "created_at": issue_data["created_at"],
                 "updated_at": issue_data["updated_at"],
+                "closed_at": issue_data.get("closed_at"),
                 "html_url": issue_data["html_url"]
             })
             
@@ -202,8 +218,8 @@ class GitHubCollector:
                 "title": pr_data["title"],
                 "state": pr_data["state"],
                 "user": {
-                    "login": pr_data["user"]["login"],
-                    "avatar_url": pr_data["user"]["avatar_url"]
+                    "login": pr_data.get("user", {}).get("login", "unknown") if pr_data.get("user") else "unknown",
+                    "avatar_url": pr_data.get("user", {}).get("avatar_url", "") if pr_data.get("user") else ""
                 },
                 "merged": pr_data.get("merged", False),
                 "created_at": pr_data["created_at"],
@@ -270,7 +286,7 @@ class GitHubCollector:
         report_lines = [
             f"# 📊 {repo['full_name']} 仓库报告",
             f"",
-            f"**生成时间**: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC",
+            f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} UTC",
             f"",
             f"## 📈 仓库概览",
             f"",
@@ -322,13 +338,439 @@ class GitHubCollector:
         return "\n".join(report_lines)
         
     async def collect_daily_updates(self) -> Dict[str, Any]:
-        """每日数据收集任务"""
-        return {"success_count": 0, "error_count": 0}
+        """收集每日更新数据"""
+        logger.info("开始收集每日更新数据")
         
+        async with get_db_session() as session:
+            # 获取所有活跃订阅
+            subscriptions = await session.execute(
+                select(Subscription).where(
+                    Subscription.status == SubscriptionStatus.ACTIVE,
+                    Subscription.frequency.in_([ReportFrequency.DAILY])
+                )
+            )
+            subscriptions = subscriptions.scalars().all()
+            
+            success_count = 0
+            error_count = 0
+            collected_data = []
+            
+            for subscription in subscriptions:
+                try:
+                    owner, repo = subscription.repository.split('/')
+                    data = await self.collect_repository_activities(
+                        subscription, 
+                        days=1,
+                        include_states=['open', 'closed', 'merged']
+                    )
+                    collected_data.append(data)
+                    success_count += 1
+                    
+                    # 发送通知
+                    await self._send_activity_notifications(subscription, data)
+                    
+                except Exception as e:
+                    logger.error(f"收集订阅 {subscription.id} 数据失败: {e}")
+                    error_count += 1
+            
+            return {
+                "success_count": success_count,
+                "error_count": error_count,
+                "collected_data": collected_data,
+                "total_subscriptions": len(subscriptions)
+            }
+
     async def collect_weekly_updates(self) -> Dict[str, Any]:
-        """每周数据收集任务"""
-        return {"success_count": 0, "error_count": 0}
+        """收集每周更新数据"""
+        logger.info("开始收集每周更新数据")
         
+        async with get_db_session() as session:
+            # 获取所有活跃的周报订阅
+            subscriptions = await session.execute(
+                select(Subscription).where(
+                    Subscription.status == SubscriptionStatus.ACTIVE,
+                    Subscription.frequency.in_([ReportFrequency.WEEKLY])
+                )
+            )
+            subscriptions = subscriptions.scalars().all()
+            
+            success_count = 0
+            error_count = 0
+            collected_data = []
+            
+            for subscription in subscriptions:
+                try:
+                    data = await self.collect_repository_activities(
+                        subscription, 
+                        days=7,
+                        include_states=['open', 'closed', 'merged']
+                    )
+                    collected_data.append(data)
+                    success_count += 1
+                    
+                    # 发送通知
+                    await self._send_activity_notifications(subscription, data)
+                    
+                except Exception as e:
+                    logger.error(f"收集订阅 {subscription.id} 数据失败: {e}")
+                    error_count += 1
+            
+            return {
+                "success_count": success_count,
+                "error_count": error_count,
+                "collected_data": collected_data,
+                "total_subscriptions": len(subscriptions)
+            }
+
+    async def collect_repository_activities(
+        self, 
+        subscription: Subscription, 
+        days: int = 7,
+        include_states: List[str] = None
+    ) -> Dict[str, Any]:
+        """
+        收集仓库活动数据并存储到数据库
+        
+        Args:
+            subscription: 订阅对象
+            days: 收集天数
+            include_states: 包含的状态列表
+        """
+        if include_states is None:
+            include_states = ['open', 'closed']
+            
+        owner, repo = subscription.repository.split('/')
+        logger.info(f"收集仓库活动: {owner}/{repo} (最近{days}天)")
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                activities = []
+                
+                # 根据订阅配置收集不同类型的活动
+                if subscription.monitor_commits:
+                    commits = await self._get_recent_commits(client, owner, repo, days)
+                    activities.extend(self._convert_commits_to_activities(commits, subscription.id))
+                
+                if subscription.monitor_issues:
+                    issues = await self._get_recent_issues_by_state(client, owner, repo, days, include_states)
+                    activities.extend(self._convert_issues_to_activities(issues, subscription.id))
+                
+                if subscription.monitor_pull_requests:
+                    prs = await self._get_recent_pull_requests_by_state(client, owner, repo, days, include_states)
+                    activities.extend(self._convert_prs_to_activities(prs, subscription.id))
+                
+                if subscription.monitor_releases:
+                    releases = await self._get_recent_releases(client, owner, repo, limit=10)
+                    activities.extend(self._convert_releases_to_activities(releases, subscription.id))
+                
+                # 存储活动数据到数据库
+                stored_activities = await self._store_activities(activities)
+                
+                # 更新订阅的最后同步时间
+                await self._update_subscription_sync_time(subscription.id)
+                
+                return {
+                    "subscription_id": subscription.id,
+                    "repository": subscription.repository,
+                    "activities": stored_activities,
+                    "total_activities": len(stored_activities),
+                    "collected_at": self._utc_now().isoformat()
+                }
+                
+        except Exception as e:
+            logger.error(f"收集仓库活动失败 {owner}/{repo}: {e}")
+            raise
+
+    async def _get_recent_issues_by_state(
+        self, 
+        client: httpx.AsyncClient, 
+        owner: str, 
+        repo: str, 
+        days: int,
+        include_states: List[str]
+    ) -> List[Dict[str, Any]]:
+        """根据状态获取最近的Issues"""
+        since = (self._utc_now() - timedelta(days=days)).isoformat()
+        all_issues = []
+        
+        for state in include_states:
+            if state not in ['open', 'closed', 'all']:
+                continue
+                
+            url = f"{self.base_url}/repos/{owner}/{repo}/issues"
+            params = {
+                "state": state,
+                "since": since,
+                "per_page": 50,
+                "sort": "updated"
+            }
+            
+            response = await client.get(url, headers=self.headers, params=params)
+            response.raise_for_status()
+            
+            for issue_data in response.json():
+                # 跳过 Pull Requests
+                if "pull_request" in issue_data:
+                    continue
+                    
+                all_issues.append({
+                    "number": issue_data["number"],
+                    "title": issue_data["title"],
+                    "body": (issue_data.get("body") or "")[:1000],  # 限制长度
+                    "state": issue_data["state"],
+                    "user": {
+                        "login": issue_data.get("user", {}).get("login", "unknown") if issue_data.get("user") else "unknown",
+                        "avatar_url": issue_data.get("user", {}).get("avatar_url", "") if issue_data.get("user") else ""
+                    },
+                    "labels": [label["name"] for label in issue_data.get("labels", [])],
+                    "assignees": [assignee["login"] for assignee in issue_data.get("assignees", [])],
+                    "milestone": issue_data.get("milestone", {}).get("title", "") if issue_data.get("milestone") else "",
+                    "comments": issue_data.get("comments", 0),
+                    "created_at": issue_data["created_at"],
+                    "updated_at": issue_data["updated_at"],
+                    "closed_at": issue_data.get("closed_at"),
+                    "html_url": issue_data["html_url"]
+                })
+        
+        # 去重（同一个issue可能在不同状态查询中出现）
+        unique_issues = {}
+        for issue in all_issues:
+            unique_issues[issue["number"]] = issue
+        
+        return list(unique_issues.values())
+
+    async def _get_recent_pull_requests_by_state(
+        self, 
+        client: httpx.AsyncClient, 
+        owner: str, 
+        repo: str, 
+        days: int,
+        include_states: List[str]
+    ) -> List[Dict[str, Any]]:
+        """根据状态获取最近的Pull Requests"""
+        cutoff_date = self._utc_now() - timedelta(days=days)
+        all_prs = []
+        
+        for state in include_states:
+            if state not in ['open', 'closed', 'all']:
+                continue
+                
+            url = f"{self.base_url}/repos/{owner}/{repo}/pulls"
+            params = {
+                "state": state,
+                "per_page": 50,
+                "sort": "updated",
+                "direction": "desc"
+            }
+            
+            response = await client.get(url, headers=self.headers, params=params)
+            response.raise_for_status()
+            
+            for pr_data in response.json():
+                updated_at = self._parse_github_datetime(pr_data["updated_at"])
+                if updated_at < cutoff_date:
+                    continue
+                    
+                all_prs.append({
+                    "number": pr_data["number"],
+                    "title": pr_data["title"],
+                    "body": (pr_data.get("body") or "")[:1000],
+                    "state": pr_data["state"],
+                    "user": {
+                        "login": pr_data.get("user", {}).get("login", "unknown") if pr_data.get("user") else "unknown",
+                        "avatar_url": pr_data.get("user", {}).get("avatar_url", "") if pr_data.get("user") else ""
+                    },
+                    "labels": [label["name"] for label in pr_data.get("labels", [])],
+                    "assignees": [assignee["login"] for assignee in pr_data.get("assignees", [])],
+                    "milestone": pr_data.get("milestone", {}).get("title", "") if pr_data.get("milestone") else "",
+                    "comments": pr_data.get("comments", 0),
+                    "commits": pr_data.get("commits", 0),
+                    "additions": pr_data.get("additions", 0),
+                    "deletions": pr_data.get("deletions", 0),
+                    "changed_files": pr_data.get("changed_files", 0),
+                    "merged": pr_data.get("merged", False),
+                    "merged_at": pr_data.get("merged_at"),
+                    "draft": pr_data.get("draft", False),
+                    "created_at": pr_data["created_at"],
+                    "updated_at": pr_data["updated_at"],
+                    "closed_at": pr_data.get("closed_at"),
+                    "html_url": pr_data["html_url"]
+                })
+        
+        # 去重
+        unique_prs = {}
+        for pr in all_prs:
+            unique_prs[pr["number"]] = pr
+        
+        return list(unique_prs.values())
+
+    def _convert_commits_to_activities(self, commits: List[Dict], subscription_id: int) -> List[Dict]:
+        """将提交数据转换为活动记录"""
+        activities = []
+        for commit in commits:
+            activities.append({
+                "subscription_id": subscription_id,
+                "activity_type": "commit",
+                "activity_id": commit["sha"],
+                "title": commit["message"].split('\n')[0][:500],  # 取第一行作为标题
+                "description": commit["message"][:1000],
+                "url": commit["html_url"],
+                "author_login": commit["author"]["login"],
+                "author_name": commit["author"]["name"],
+                "github_created_at": self._parse_github_datetime(commit["date"]),
+                "github_updated_at": self._parse_github_datetime(commit["date"])
+            })
+        return activities
+
+    def _convert_issues_to_activities(self, issues: List[Dict], subscription_id: int) -> List[Dict]:
+        """将Issue数据转换为活动记录"""
+        activities = []
+        for issue in issues:
+            activities.append({
+                "subscription_id": subscription_id,
+                "activity_type": "issue",
+                "activity_id": str(issue["number"]),
+                "title": issue["title"][:500],
+                "description": issue["body"][:1000],
+                "url": issue["html_url"],
+                "author_login": issue["user"]["login"],
+                "author_avatar_url": issue["user"]["avatar_url"],
+                "labels": json.dumps(issue["labels"]),
+                "assignees": json.dumps(issue["assignees"]),
+                "milestone": issue["milestone"],
+                "comments_count": issue.get("comments", 0),
+                "state": issue["state"],
+                "github_created_at": self._parse_github_datetime(issue["created_at"]),
+                "github_updated_at": self._parse_github_datetime(issue["updated_at"])
+            })
+        return activities
+
+    def _convert_prs_to_activities(self, prs: List[Dict], subscription_id: int) -> List[Dict]:
+        """将PR数据转换为活动记录"""
+        activities = []
+        for pr in prs:
+            activities.append({
+                "subscription_id": subscription_id,
+                "activity_type": "pull_request",
+                "activity_id": str(pr["number"]),
+                "title": pr["title"][:500],
+                "description": pr["body"][:1000],
+                "url": pr["html_url"],
+                "author_login": pr["user"]["login"],
+                "author_avatar_url": pr["user"]["avatar_url"],
+                "labels": json.dumps(pr["labels"]),
+                "assignees": json.dumps(pr["assignees"]),
+                "milestone": pr["milestone"],
+                "comments_count": pr.get("comments", 0),
+                "state": pr["state"],
+                "is_draft": pr.get("draft", False),
+                "is_merged": pr.get("merged", False),
+                "github_created_at": self._parse_github_datetime(pr["created_at"]),
+                "github_updated_at": self._parse_github_datetime(pr["updated_at"])
+            })
+        return activities
+
+    def _convert_releases_to_activities(self, releases: List[Dict], subscription_id: int) -> List[Dict]:
+        """将Release数据转换为活动记录"""
+        activities = []
+        for release in releases:
+            activities.append({
+                "subscription_id": subscription_id,
+                "activity_type": "release",
+                "activity_id": str(release["id"]),
+                "title": release["name"] or release["tag_name"],
+                "description": release["body"][:1000],
+                "url": release["html_url"],
+                "author_login": release["author"]["login"],
+                "author_avatar_url": release["author"]["avatar_url"],
+                "github_created_at": self._parse_github_datetime(release["created_at"]),
+                "github_updated_at": self._parse_github_datetime(release["published_at"] or release["created_at"])
+            })
+        return activities
+
+    async def _store_activities(self, activities: List[Dict]) -> List[Dict]:
+        """存储活动数据到数据库"""
+        if not activities:
+            return []
+            
+        async with get_db_session() as session:
+            stored_activities = []
+            
+            for activity_data in activities:
+                # 检查是否已存在
+                existing = await session.execute(
+                    select(RepositoryActivity).where(
+                        RepositoryActivity.subscription_id == activity_data["subscription_id"],
+                        RepositoryActivity.activity_type == activity_data["activity_type"],
+                        RepositoryActivity.activity_id == activity_data["activity_id"]
+                    )
+                )
+                existing = existing.scalar_one_or_none()
+                
+                if existing:
+                    # 更新现有记录
+                    for key, value in activity_data.items():
+                        if hasattr(existing, key):
+                            setattr(existing, key, value)
+                    stored_activities.append(existing)
+                else:
+                    # 创建新记录
+                    activity = RepositoryActivity(**activity_data)
+                    session.add(activity)
+                    stored_activities.append(activity)
+            
+            await session.commit()
+            
+            # 转换为字典格式返回
+            return [
+                {
+                    "id": activity.id,
+                    "activity_type": activity.activity_type,
+                    "title": activity.title,
+                    "author_login": activity.author_login,
+                    "created_at": activity.github_created_at.isoformat() if activity.github_created_at else None,
+                    "url": activity.url
+                }
+                for activity in stored_activities
+            ]
+
+    async def _update_subscription_sync_time(self, subscription_id: int) -> None:
+        """更新订阅的最后同步时间"""
+        async with get_db_session() as session:
+            subscription = await session.get(Subscription, subscription_id)
+            if subscription:
+                subscription.last_sync_at = self._utc_now()
+                await session.commit()
+
+    async def _send_activity_notifications(self, subscription: Subscription, data: Dict[str, Any]) -> None:
+        """发送活动通知"""
+        if not data.get("activities"):
+            return
+            
+        try:
+            from app.services.notification_service import NotificationService
+            
+            notification_service = NotificationService()
+            
+            # 为每个新活动发送通知
+            for activity in data["activities"]:
+                activity_data = {
+                    "activity_type": activity["activity_type"],
+                    "activity_title": activity["title"],
+                    "activity_author": activity["author_login"],
+                    "activity_url": activity["url"],
+                    "activity_time": activity["created_at"]
+                }
+                
+                await notification_service.send_subscription_notification(
+                    subscription, 
+                    activity_data, 
+                    "activity"
+                )
+                
+        except Exception as e:
+            logger.error(f"发送活动通知失败: {e}")
+
     async def collect_all(self) -> Dict[str, Any]:
         """收集所有订阅的仓库数据"""
         return {"success_count": 0, "error_count": 0}

@@ -8,6 +8,9 @@ import os
 from pathlib import Path
 from loguru import logger
 from app.core.config import get_settings
+import logging
+from typing import Optional
+import traceback
 
 
 def setup_logger():
@@ -62,11 +65,42 @@ def setup_logger():
     return logger
 
 
-def get_logger(name: str = None):
-    """获取logger实例"""
-    if name:
-        return logger.bind(name=name)
-    return logger
+def get_logger(name: str):
+    """获取增强的 loguru logger 实例"""
+    # 创建一个包装器类来增强 loguru logger
+    class EnhancedLogger:
+        def __init__(self, logger_instance):
+            self._logger = logger_instance
+            self.name = name
+        
+        def __getattr__(self, item):
+            # 对于非 error 方法，直接返回原始方法
+            if item != 'error':
+                return getattr(self._logger, item)
+            
+            # 增强的 error 方法
+            def enhanced_error(message, *args, **kwargs):
+                # 自动添加异常信息
+                if 'exception' not in kwargs and sys.exc_info()[0] is not None:
+                    kwargs['exception'] = True
+                return self._logger.error(message, *args, **kwargs)
+            
+            return enhanced_error
+        
+        # 代理常用方法
+        def info(self, message, *args, **kwargs):
+            return self._logger.info(message, *args, **kwargs)
+        
+        def warning(self, message, *args, **kwargs):
+            return self._logger.warning(message, *args, **kwargs)
+        
+        def debug(self, message, *args, **kwargs):
+            return self._logger.debug(message, *args, **kwargs)
+        
+        def critical(self, message, *args, **kwargs):
+            return self._logger.critical(message, *args, **kwargs)
+    
+    return EnhancedLogger(logger)
 
 
 # 全局logger实例

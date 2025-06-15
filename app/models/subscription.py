@@ -12,6 +12,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.utils.timezone_utils import beijing_now
 
 
 class SubscriptionStatus(str, Enum):
@@ -46,8 +47,8 @@ class User(Base):
     slack_webhook_url = Column(String(500), comment="Slack Webhook URL")
     
     # 时间戳
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), comment="更新时间")
+    created_at = Column(DateTime(timezone=True), default=beijing_now, comment="创建时间")
+    updated_at = Column(DateTime(timezone=True), onupdate=beijing_now, comment="更新时间")
     last_login = Column(DateTime(timezone=True), comment="最后登录时间")
     
     # 关系
@@ -96,8 +97,8 @@ class Subscription(Base):
     enable_webhook_notification = Column(Boolean, default=False, comment="是否启用Webhook通知")
     
     # 时间戳
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), comment="更新时间") 
+    created_at = Column(DateTime(timezone=True), default=beijing_now, comment="创建时间")
+    updated_at = Column(DateTime(timezone=True), onupdate=beijing_now, comment="更新时间") 
     last_sync_at = Column(DateTime(timezone=True), comment="最后同步时间")
     
     # 关系
@@ -142,7 +143,7 @@ class RepositoryActivity(Base):
     # 时间信息
     github_created_at = Column(DateTime(timezone=True), comment="GitHub创建时间")
     github_updated_at = Column(DateTime(timezone=True), comment="GitHub更新时间")
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="本地创建时间")
+    created_at = Column(DateTime(timezone=True), default=beijing_now, comment="本地创建时间")
     
     # 关系
     subscription = relationship("Subscription", back_populates="activities")

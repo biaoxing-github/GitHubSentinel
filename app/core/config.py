@@ -48,13 +48,13 @@ class AIConfig(BaseModel):
     temperature: float = Field(default=0.7, description="生成温度")
 
 
-class ScheduleConfig(BaseModel):
+class ScheduleSettings(BaseModel):
     """调度配置"""
-    enabled: bool = Field(default=True, description="是否启用调度")
-    daily_time: str = Field(default="08:00", description="每日执行时间")
-    weekly_day: int = Field(default=1, description="每周执行日期(1-7)")
-    weekly_time: str = Field(default="08:00", description="每周执行时间")
+    enabled: bool = Field(default=True, description="是否启用调度器")
     timezone: str = Field(default="Asia/Shanghai", description="时区")
+    daily_time: str = Field(default="09:00", description="每日执行时间")
+    weekly_time: str = Field(default="09:00", description="每周执行时间")
+    weekly_day: int = Field(default=1, description="每周执行日期 (1=周一)")
 
 
 class NotificationConfig(BaseModel):
@@ -126,7 +126,7 @@ class Settings(BaseSettings):
     redis: RedisConfig = Field(default_factory=RedisConfig)
     github: GitHubConfig = Field(default_factory=lambda: GitHubConfig(token=""))
     ai: AIConfig = Field(default_factory=AIConfig)
-    schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
+    schedule: ScheduleSettings = Field(default_factory=ScheduleSettings)
     notification: NotificationConfig = Field(default_factory=NotificationConfig)
     
     # 日志配置

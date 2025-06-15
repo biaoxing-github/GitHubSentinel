@@ -8,10 +8,16 @@ from datetime import datetime, timedelta
 import json
 
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import and_, or_, desc
+from sqlalchemy import and_, or_, desc, select, func
 
 from app.models.report import Report, ReportTemplate, TaskExecution, ReportType, ReportStatus, ReportFormat
+from app.models.subscription import User, Subscription, SubscriptionStatus, ReportFrequency
 from app.core.database import get_db_session
+from app.core.logger import get_logger
+from app.services.ai_service import AIService
+from app.services.notification_service import NotificationService
+
+logger = get_logger(__name__)
 
 
 class ReportService:
@@ -25,6 +31,7 @@ class ReportService:
         period_start: datetime,
         period_end: datetime,
         description: Optional[str] = None,
+        repository: Optional[str] = None,
         format: str = ReportFormat.HTML,
         subscriptions_included: Optional[List[int]] = None
     ) -> Report:
@@ -34,6 +41,7 @@ class ReportService:
                 user_id=user_id,
                 title=title,
                 description=description,
+                repository=repository,
                 report_type=report_type,
                 format=format,
                 period_start=period_start,
@@ -49,7 +57,6 @@ class ReportService:
     async def get_report(report_id: int) -> Optional[Report]:
         """根据ID获取报告"""
         async with get_db_session() as session:
-            from sqlalchemy import select
             result = await session.execute(
                 select(Report)
                 .options(selectinload(Report.user))
@@ -67,7 +74,7 @@ class ReportService:
     ) -> List[Report]:
         """获取用户的报告列表"""
         async with get_db_session() as session:
-            query = session.query(Report).filter(Report.user_id == user_id)
+            query = select(Report).filter(Report.user_id == user_id)
             
             if status:
                 query = query.filter(Report.status == status)
@@ -90,8 +97,6 @@ class ReportService:
     ) -> List[Report]:
         """获取所有报告"""
         async with get_db_session() as session:
-            from sqlalchemy import select
-            
             query = select(Report)
             
             if status:
@@ -130,7 +135,7 @@ class ReportService:
             if status is not None:
                 report.status = status
                 if status == ReportStatus.COMPLETED:
-                    report.generated_at = datetime.utcnow()
+                    report.generated_at = datetime.now()
             if summary is not None:
                 report.summary = summary
             if content is not None:
@@ -199,8 +204,6 @@ class ReportService:
     ) -> int:
         """获取报告总数"""
         async with get_db_session() as session:
-            from sqlalchemy import select, func
-            
             query = select(func.count(Report.id))
             
             if user_id is not None:
@@ -219,9 +222,9 @@ class ReportService:
     async def get_recent_reports(days: int = 7, limit: int = 10) -> List[Report]:
         """获取最近的报告"""
         async with get_db_session() as session:
-            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            cutoff_date = datetime.now() - timedelta(days=days)
             result = await session.execute(
-                session.query(Report)
+                select(Report)
                 .filter(Report.created_at >= cutoff_date)
                 .order_by(desc(Report.created_at))
                 .limit(limit)
@@ -268,7 +271,7 @@ class ReportService:
     ) -> List[ReportTemplate]:
         """获取报告模板列表"""
         async with get_db_session() as session:
-            query = session.query(ReportTemplate)
+            query = select(ReportTemplate)
             
             if user_id is not None:
                 # 获取用户自己的模板和系统模板
@@ -300,7 +303,7 @@ class ReportService:
                 task_name=task_name,
                 task_type=task_type,
                 status=status,
-                started_at=datetime.utcnow()
+                started_at=datetime.now()
             )
             session.add(execution)
             await session.commit()
@@ -326,7 +329,7 @@ class ReportService:
             if status is not None:
                 execution.status = status
                 if status in ["completed", "failed"]:
-                    execution.completed_at = datetime.utcnow()
+                    execution.completed_at = datetime.now()
                     if execution.started_at:
                         duration = execution.completed_at - execution.started_at
                         execution.duration_seconds = int(duration.total_seconds())
@@ -344,4 +347,228 @@ class ReportService:
             
             await session.commit()
             await session.refresh(execution)
-            return execution 
+            return execution
+    
+    @staticmethod
+    async def _generate_user_daily_report(
+        user: User, 
+        subscriptions: List[Subscription], 
+        ai_service: AIService
+    ) -> Optional[Report]:
+        """为用户生成每日报告"""
+        from app.models.subscription import RepositoryActivity
+        from app.utils.timezone_utils import beijing_now, format_beijing_time
+        
+        today = beijing_now().date()
+        yesterday = today - timedelta(days=1)
+        
+        # 生成包含仓库信息的标题
+        repo_names = [sub.repository for sub in subscriptions]
+        if len(repo_names) == 1:
+            title = f"{repo_names[0]} - 每日报告 ({today.strftime('%Y-%m-%d')})"
+        else:
+            title = f"多仓库每日报告 ({len(repo_names)}个仓库) - {today.strftime('%Y-%m-%d')}"
+        
+        # 创建报告记录
+        report = await ReportService.create_report(
+            user_id=user.id,
+            title=title,
+            report_type=ReportType.DAILY,
+            period_start=datetime.combine(yesterday, datetime.min.time()),
+            period_end=datetime.combine(today, datetime.min.time()),
+            description=f"用户 {user.username} 的每日GitHub活动报告 - 监控仓库: {', '.join(repo_names)}",
+            format=ReportFormat.HTML
+        )
+        return report
+
+    @staticmethod
+    async def _send_report_notifications(
+        report: Report,
+        subscriptions: List[Subscription],
+        notification_service: NotificationService
+    ) -> None:
+        """发送报告通知"""
+        try:
+            from app.utils.timezone_utils import format_beijing_time
+            
+            # 生成报告邮件内容
+            email_subject = f"📊 GitHub Sentinel 每日报告 - {format_beijing_time(report.period_start, '%Y年%m月%d日')}"
+            
+            # 为每个订阅发送报告通知
+            for subscription in subscriptions:
+                # 检查是否启用邮件通知
+                if not subscription.enable_email_notification:
+                    continue
+                
+                # 获取通知邮箱列表
+                notification_emails = []
+                if subscription.notification_emails:
+                    try:
+                        notification_emails = json.loads(subscription.notification_emails)
+                    except:
+                        pass
+                
+                if not notification_emails:
+                    continue
+                
+                # 生成邮件内容
+                email_content = ReportService._generate_report_email_content(report, subscription)
+                
+                # 发送邮件
+                for email in notification_emails:
+                    try:
+                        await notification_service.send_email_notification(
+                            to_email=email,
+                            subject=email_subject,
+                            content=email_content,
+                            content_type="html"
+                        )
+                        logger.info(f"✅ 报告邮件发送成功: {email}")
+                    except Exception as e:
+                        logger.error(f"💥 发送报告邮件失败 {email}: {e}")
+                
+                # 发送其他类型的通知
+                report_data = {
+                    "report_id": report.id,
+                    "report_title": report.title,
+                    "report_summary": report.summary or "每日GitHub活动报告",
+                    "report_url": f"/reports/{report.id}",
+                    "period_start": report.period_start.isoformat(),
+                    "period_end": report.period_end.isoformat(),
+                    "repository": subscription.repository
+                }
+                
+                await notification_service.send_subscription_notification(
+                    subscription,
+                    report_data,
+                    "report"
+                )
+                
+        except Exception as e:
+            logger.error(f"发送报告通知失败: {e}")
+
+    @staticmethod
+    def _generate_report_email_content(report: Report, subscription: Subscription) -> str:
+        """生成报告邮件内容"""
+        from app.utils.timezone_utils import format_beijing_time
+        
+        # 如果报告有HTML内容，直接使用
+        if report.content and report.format == "html":
+            return report.content
+        
+        # 否则生成简单的邮件内容
+        email_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>GitHub Sentinel 每日报告</title>
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    max-width: 600px;
+                    margin: 0 auto;
+                    padding: 20px;
+                }}
+                .header {{
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 30px;
+                    border-radius: 10px;
+                    text-align: center;
+                    margin-bottom: 30px;
+                }}
+                .content {{
+                    background: #f8f9fa;
+                    padding: 20px;
+                    border-radius: 8px;
+                    border-left: 4px solid #007bff;
+                    margin-bottom: 20px;
+                }}
+                .footer {{
+                    text-align: center;
+                    color: #666;
+                    font-size: 14px;
+                    margin-top: 30px;
+                    padding-top: 20px;
+                    border-top: 1px solid #e9ecef;
+                }}
+                .btn {{
+                    display: inline-block;
+                    padding: 12px 24px;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 6px;
+                    font-weight: 500;
+                    margin: 10px 0;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>📊 GitHub Sentinel 每日报告</h1>
+                <p>仓库: {subscription.repository}</p>
+                <p>日期: {format_beijing_time(report.period_start, '%Y年%m月%d日')}</p>
+            </div>
+            
+            <div class="content">
+                <h2>📋 报告摘要</h2>
+                <p>{report.summary or '每日GitHub活动报告已生成'}</p>
+                
+                <h3>📊 统计信息</h3>
+                <ul>
+                    <li>监控仓库: {report.total_repositories or 1} 个</li>
+                    <li>总活动数: {report.total_activities or 0} 项</li>
+                    <li>代码提交: {report.total_commits or 0} 次</li>
+                    <li>Issues: {report.total_issues or 0} 个</li>
+                    <li>Pull Requests: {report.total_pull_requests or 0} 个</li>
+                    <li>版本发布: {report.total_releases or 0} 个</li>
+                </ul>
+                
+                <p style="text-align: center; margin-top: 20px;">
+                    <a href="http://localhost:5173/reports/{report.id}" class="btn">查看完整报告</a>
+                </p>
+            </div>
+            
+            <div class="footer">
+                <p>📅 报告生成时间: {format_beijing_time(report.created_at) if report.created_at else '未知'}</p>
+                <p>🤖 由 GitHub Sentinel 自动生成并发送</p>
+                <p>如不想接收此类邮件，请在系统中修改通知设置</p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return email_content 
+
+    @staticmethod
+    async def get_report_count_by_period(
+        start_time: datetime,
+        end_time: datetime,
+        user_id: Optional[int] = None,
+        status: Optional[str] = None,
+        report_type: Optional[str] = None
+    ) -> int:
+        """按时间段获取报告数量"""
+        async with get_db_session() as session:
+            query = select(func.count(Report.id)).filter(
+                and_(
+                    Report.created_at >= start_time,
+                    Report.created_at <= end_time
+                )
+            )
+            
+            if user_id:
+                query = query.filter(Report.user_id == user_id)
+            
+            if status:
+                query = query.filter(Report.status == status)
+            
+            if report_type:
+                query = query.filter(Report.report_type == report_type)
+            
+            result = await session.execute(query)
+            return result.scalar() or 0 

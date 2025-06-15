@@ -1,6 +1,6 @@
 # Release Notes
 
-## v0.1.0 - Initial Release (2025-01-15)
+## v0.1.0 - Initial Release (2025-06-15)
 
 ### 🎉 First Major Release
 

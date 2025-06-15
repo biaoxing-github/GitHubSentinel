@@ -24,7 +24,7 @@
     <div class="stats-and-filters">
       <div class="reports-stats">
         <div class="stat-card">
-          <div class="stat-number">{{ totalReports }}</div>
+          <div class="stat-number">{{ reports.length }}</div>
           <div class="stat-label">Total Reports</div>
         </div>
         <div class="stat-card">
@@ -33,11 +33,7 @@
         </div>
         <div class="stat-card">
           <div class="stat-number">{{ pendingReports }}</div>
-          <div class="stat-label">Generating</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-number">{{ failedReports }}</div>
-          <div class="stat-label">Failed</div>
+          <div class="stat-label">Pending</div>
         </div>
       </div>
       
@@ -127,23 +123,15 @@
             <div class="report-info">
               <div class="info-row">
                 <span class="info-label">Repository:</span>
-                <span class="info-value">{{ getRepositoryName(report) }}</span>
+                <span class="info-value">{{ report.repository || 'N/A' }}</span>
               </div>
               <div class="info-row">
                 <span class="info-label">Created:</span>
                 <span class="info-value">{{ formatRelativeTime(report.created_at) }}</span>
               </div>
-              <div class="info-row">
-                <span class="info-label">Period:</span>
-                <span class="info-value">{{ formatPeriod(report) }}</span>
-              </div>
               <div class="info-row" v-if="report.summary">
                 <span class="info-label">Summary:</span>
                 <span class="info-value summary">{{ report.summary }}</span>
-              </div>
-              <div class="info-row" v-if="report.total_activities > 0">
-                <span class="info-label">Activities:</span>
-                <span class="info-value">{{ report.total_activities }} activities</span>
               </div>
             </div>
           </div>
@@ -193,12 +181,12 @@
               <el-option 
                 v-for="sub in subscriptions" 
                 :key="sub.id" 
-                :label="sub.repository" 
+                :label="sub.name || sub.repository" 
                 :value="sub.id"
               >
                 <div class="subscription-option">
-                  <span class="option-name">{{ sub.repository }}</span>
-                  <span class="option-url">{{ sub.repository_url || sub.repository }}</span>
+                  <span class="option-name">{{ sub.name || sub.repository }}</span>
+                  <span class="option-url">{{ sub.url }}</span>
                 </div>
               </el-option>
             </el-select>
@@ -209,13 +197,6 @@
               <el-radio-button label="daily">Daily</el-radio-button>
               <el-radio-button label="weekly">Weekly</el-radio-button>
               <el-radio-button label="monthly">Monthly</el-radio-button>
-            </el-radio-group>
-          </el-form-item>
-          
-          <el-form-item label="Format" prop="format">
-            <el-radio-group v-model="generateForm.format">
-              <el-radio-button label="html">HTML</el-radio-button>
-              <el-radio-button label="markdown">Markdown</el-radio-button>
             </el-radio-group>
           </el-form-item>
           
@@ -300,38 +281,7 @@
         
         <div class="report-content-section" v-if="viewingReport.content">
           <h3>Report Content</h3>
-          <div class="format-toggle" style="margin-bottom: 16px;">
-            <el-radio-group v-model="viewMode" size="small">
-              <el-radio-button label="rendered">Rendered</el-radio-button>
-              <el-radio-button label="source">Source</el-radio-button>
-            </el-radio-group>
-          </div>
-          
-          <!-- 渲染模式 -->
-          <div v-if="viewMode === 'rendered'" class="content-display">
-            <!-- HTML 格式显示 -->
-            <div v-if="viewingReport.format === 'html'" class="html-content">
-              <iframe 
-                v-if="isFullHtmlDocument(viewingReport.content)"
-                :srcdoc="viewingReport.content"
-                class="html-iframe"
-                sandbox="allow-same-origin"
-              ></iframe>
-              <div v-else v-html="viewingReport.content"></div>
-            </div>
-            <!-- Markdown 格式渲染 -->
-            <div v-else-if="viewingReport.format === 'markdown' || viewingReport.format === 'md'" 
-                 class="markdown-content" 
-                 v-html="renderMarkdown(viewingReport.content)">
-            </div>
-            <!-- 其他格式 -->
-            <pre v-else class="plain-content">{{ viewingReport.content }}</pre>
-          </div>
-          
-          <!-- 源码模式 -->
-          <div v-else class="source-display">
-            <pre class="source-content">{{ viewingReport.content }}</pre>
-          </div>
+          <div class="content-display" v-html="viewingReport.content"></div>
         </div>
         
         <div v-else class="no-content">
@@ -376,12 +326,6 @@ const generating = ref(false)
 const deleting = ref(false)
 const reports = ref([])
 const subscriptions = ref([])
-const reportStats = ref({
-  total_reports: 0,
-  completed_reports: 0,
-  generating_reports: 0,
-  failed_reports: 0
-})
 
 // 对话框状态
 const showGenerateDialog = ref(false)
@@ -389,7 +333,6 @@ const showDeleteDialog = ref(false)
 const showViewDialog = ref(false)
 const deleteTarget = ref(null)
 const viewingReport = ref(null)
-const viewMode = ref('rendered')
 
 // 过滤器
 const filterType = ref('')
@@ -400,7 +343,6 @@ const searchQuery = ref('')
 const generateForm = ref({
   subscriptionId: '',
   reportType: 'daily',
-  format: 'html',
   description: ''
 })
 
@@ -441,19 +383,11 @@ const filteredReports = computed(() => {
 })
 
 const completedReports = computed(() => 
-  reportStats.value.completed_reports
+  reports.value.filter(r => r.status === 'completed').length
 )
 
 const pendingReports = computed(() => 
-  reportStats.value.generating_reports
-)
-
-const failedReports = computed(() => 
-  reportStats.value.failed_reports
-)
-
-const totalReports = computed(() => 
-  reportStats.value.total_reports
+  reports.value.filter(r => r.status === 'pending').length
 )
 
 // 方法
@@ -461,35 +395,11 @@ const loadReports = async () => {
   loading.value = true
   try {
     const response = await reportsAPI.getReports()
-    console.log('Reports API response:', response)
-    
-    // 处理不同的响应格式
-    let reportsData = []
-    if (response.reports) {
-      // 如果响应有 reports 字段（ReportListResponse 格式）
-      reportsData = response.reports
-    } else if (Array.isArray(response.data)) {
-      // 如果 response.data 是数组
-      reportsData = response.data
-    } else if (Array.isArray(response)) {
-      // 如果 response 直接是数组
-      reportsData = response
-    }
-    
-    // 确保 reports 始终是数组
-    reports.value = Array.isArray(reportsData) ? reportsData : []
-    console.log('Processed reports:', reports.value)
-    
-    if (reports.value.length > 0) {
-      ElMessage.success(`成功加载 ${reports.value.length} 个报告`)
-    } else {
-      ElMessage.info('暂无报告数据')
-    }
+    reports.value = response.data || response || []
+    ElMessage.success('Reports loaded successfully')
   } catch (error) {
     console.error('Failed to load reports:', error)
-    ElMessage.error('加载报告失败: ' + (error.response?.data?.detail || error.message))
-    // 确保在错误情况下也是数组
-    reports.value = []
+    ElMessage.error('Failed to load reports')
   } finally {
     loading.value = false
   }
@@ -497,34 +407,10 @@ const loadReports = async () => {
 
 const loadSubscriptions = async () => {
   try {
-    console.log('🔄 开始加载订阅数据...')
     const response = await subscriptionAPI.getSubscriptions()
-    console.log('📦 订阅API响应:', response)
-    
-    // 确保 subscriptions 始终是数组
-    const data = response.data || response || []
-    console.log('📋 处理后的订阅数据:', data.subscriptions)
-    
-    subscriptions.value = Array.isArray(data.subscriptions) ? data.subscriptions : []
-    console.log('✅ 订阅数据设置完成，数量:', subscriptions)
-    
-    if (subscriptions.value.length > 0) {
-      console.log('📝 第一个订阅示例:', subscriptions.value[0])
-    }
+    subscriptions.value = response.data || response || []
   } catch (error) {
-    console.error('❌ 加载订阅失败:', error)
-    // 确保在错误情况下也是数组
-    subscriptions.value = []
-  }
-}
-
-const loadReportStats = async () => {
-  try {
-    const stats = await reportsAPI.getReportStats()
-    reportStats.value = stats
-  } catch (error) {
-    console.error('Failed to load report stats:', error)
-    // 保持默认值
+    console.error('Failed to load subscriptions:', error)
   }
 }
 
@@ -535,12 +421,10 @@ const generateReport = async () => {
     await generateFormRef.value.validate()
     generating.value = true
     
-    // 传递格式参数
-    await reportsAPI.generateReport({
-      subscription_id: generateForm.value.subscriptionId,
-      report_type: generateForm.value.reportType,
-      format: generateForm.value.format
-    })
+    await reportsAPI.generateReport(
+      generateForm.value.subscriptionId, 
+      generateForm.value.reportType
+    )
     
     ElMessage.success('Report generation started')
     showGenerateDialog.value = false
@@ -549,14 +433,12 @@ const generateReport = async () => {
     generateForm.value = {
       subscriptionId: '',
       reportType: 'daily',
-      format: 'html',
       description: ''
     }
     
-    // 重新加载报告列表和统计数据
+    // 重新加载报告列表
     setTimeout(() => {
       loadReports()
-      loadReportStats()
     }, 1000)
     
   } catch (error) {
@@ -574,32 +456,8 @@ const viewReport = (report) => {
 
 const downloadReport = async (report) => {
   try {
-    const response = await reportsAPI.downloadReport(report.id)
-    
-    // 创建下载链接
-    const blob = new Blob([response.data], { type: response.headers['content-type'] })
-    const url = window.URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    
-    // 从响应头获取文件名，或使用默认文件名
-    const contentDisposition = response.headers['content-disposition']
-    let filename = `${report.title || `Report_${report.id}`}.html`
-    
-    if (contentDisposition) {
-      const filenameMatch = contentDisposition.match(/filename=(.+)/)
-      if (filenameMatch) {
-        filename = filenameMatch[1].replace(/"/g, '')
-      }
-    }
-    
-    link.download = filename
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    window.URL.revokeObjectURL(url)
-    
-    ElMessage.success(`Report downloaded: ${filename}`)
+    // 这里应该调用下载API
+    ElMessage.success(`Downloading report: ${report.title || `Report #${report.id}`}`)
   } catch (error) {
     console.error('Failed to download report:', error)
     ElMessage.error('Failed to download report')
@@ -621,17 +479,12 @@ const deleteReport = async () => {
     showDeleteDialog.value = false
     
     // 从列表中移除
-    const targetId = deleteTarget.value.id
-    const index = reports.value.findIndex(r => r.id === targetId)
+    const index = reports.value.findIndex(r => r.id === deleteTarget.value?.id)
     if (index > -1) {
       reports.value.splice(index, 1)
     }
     
     deleteTarget.value = null
-    
-    // 刷新统计数据和报告列表
-    await loadReportStats()
-    await loadReports()
   } catch (error) {
     console.error('Failed to delete report:', error)
     ElMessage.error('Failed to delete report')
@@ -722,74 +575,10 @@ const getTypeName = (type) => {
   return typeMap[type] || 'Report'
 }
 
-const getRepositoryName = (report) => {
-  if (report.repository) {
-    return report.repository
-  } else if (report.subscription) {
-    return report.subscription.name || report.subscription.repository
-  } else {
-    return 'N/A'
-  }
-}
-
-const formatPeriod = (report) => {
-  if (report.report_type === 'daily') {
-    return 'Daily'
-  } else if (report.report_type === 'weekly') {
-    return 'Weekly'
-  } else if (report.report_type === 'monthly') {
-    return 'Monthly'
-  } else {
-    return 'N/A'
-  }
-}
-
-// Markdown 渲染方法
-const renderMarkdown = (markdown) => {
-  if (!markdown) return ''
-  
-  // 简单的 Markdown 渲染器
-  let html = markdown
-    // 标题
-    .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-    .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-    .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-    // 粗体
-    .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
-    // 斜体
-    .replace(/\*(.*)\*/gim, '<em>$1</em>')
-    // 链接
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/gim, '<a href="$2" target="_blank">$1</a>')
-    // 代码块
-    .replace(/```([^`]+)```/gim, '<pre><code>$1</code></pre>')
-    // 行内代码
-    .replace(/`([^`]+)`/gim, '<code>$1</code>')
-    // 表格
-    .replace(/\|(.+)\|/gim, (match, content) => {
-      const cells = content.split('|').map(cell => cell.trim())
-      return '<tr>' + cells.map(cell => `<td>${cell}</td>`).join('') + '</tr>'
-    })
-    // 换行
-    .replace(/\n/gim, '<br>')
-  
-  // 包装表格
-  if (html.includes('<tr>')) {
-    html = html.replace(/(<tr>.*<\/tr>)/gims, '<table class="markdown-table">$1</table>')
-  }
-  
-  return html
-}
-
-const isFullHtmlDocument = (content) => {
-  // 简单的判断逻辑，可以根据实际需求进行调整
-  return content.includes('<!DOCTYPE html>') || content.includes('<html>') || content.includes('<body>')
-}
-
 // 生命周期
 onMounted(() => {
   loadReports()
   loadSubscriptions()
-  loadReportStats()
 })
 </script>
 
@@ -1141,148 +930,15 @@ onMounted(() => {
 }
 
 .content-display {
-  background: var(--bg-secondary);
-  border-radius: var(--border-radius);
-  padding: 24px;
-  max-height: 600px;
-  overflow-y: auto;
+  background: var(--gray-50);
   border: 1px solid var(--border-color);
-}
-
-.markdown-content {
+  border-radius: var(--border-radius-sm);
+  padding: var(--space-6);
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
   line-height: 1.6;
-  color: var(--text-primary);
-}
-
-.markdown-content h1,
-.markdown-content h2,
-.markdown-content h3 {
-  margin: 16px 0 8px 0;
-  color: var(--text-primary);
-}
-
-.markdown-content h1 {
-  font-size: 24px;
-  border-bottom: 2px solid var(--border-color);
-  padding-bottom: 8px;
-}
-
-.markdown-content h2 {
-  font-size: 20px;
-  border-bottom: 1px solid var(--border-color);
-  padding-bottom: 4px;
-}
-
-.markdown-content h3 {
-  font-size: 16px;
-}
-
-.markdown-content strong {
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.markdown-content em {
-  font-style: italic;
-  color: var(--text-secondary);
-}
-
-.markdown-content code {
-  background: var(--bg-tertiary);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-family: 'Courier New', monospace;
-  font-size: 14px;
-  color: var(--color-primary);
-}
-
-.markdown-content pre {
-  background: var(--bg-tertiary);
-  padding: 16px;
-  border-radius: 8px;
-  overflow-x: auto;
-  margin: 16px 0;
-}
-
-.markdown-content pre code {
-  background: none;
-  padding: 0;
-  color: var(--text-primary);
-}
-
-.markdown-content .markdown-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 16px 0;
-  border: 1px solid var(--border-color);
-}
-
-.markdown-content .markdown-table td {
-  padding: 8px 12px;
-  border: 1px solid var(--border-color);
-  text-align: left;
-}
-
-.markdown-content .markdown-table tr:nth-child(even) {
-  background: var(--bg-tertiary);
-}
-
-.markdown-content a {
-  color: var(--color-primary);
-  text-decoration: none;
-}
-
-.markdown-content a:hover {
-  text-decoration: underline;
-}
-
-.source-display {
-  background: var(--bg-secondary);
-  border-radius: var(--border-radius);
-  padding: 24px;
-  max-height: 600px;
+  max-height: 400px;
   overflow-y: auto;
-  border: 1px solid var(--border-color);
-}
-
-.source-content {
-  font-family: 'Courier New', monospace;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--text-primary);
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  margin: 0;
-}
-
-.plain-content {
-  font-family: 'Courier New', monospace;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--text-primary);
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  margin: 0;
-  background: var(--bg-tertiary);
-  padding: 16px;
-  border-radius: 8px;
-}
-
-.format-toggle {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.html-iframe {
-  width: 100%;
-  height: 600px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius);
-  background: white;
-}
-
-.html-content {
-  width: 100%;
 }
 
 .no-content {

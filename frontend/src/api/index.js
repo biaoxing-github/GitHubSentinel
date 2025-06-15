@@ -119,8 +119,18 @@ export const reportsAPI = {
   createReport: (reportData) => api.post('/reports', reportData),
   
   // 生成报告
-  generateReport: (subscriptionId, reportType = 'daily') => 
-    api.post('/reports/generate', { subscription_id: subscriptionId, report_type: reportType }),
+  generateReport: (data) => api.post('/reports/generate', data),
+  
+  // 下载报告
+  downloadReport: async (id) => {
+    const response = await axios.get(`/api/v1/reports/${id}/download`, {
+      responseType: 'blob'
+    })
+    return response
+  },
+  
+  // 删除报告
+  deleteReport: (id) => api.delete(`/reports/${id}`),
   
   // 获取报告模板
   getReportTemplates: () => api.get('/reports/templates/'),
@@ -140,10 +150,16 @@ export const dashboardAPI = {
   getRepositoryStats: () => api.get('/dashboard/repository-stats'),
   
   // 获取最近活动
-  getRecentActivities: (limit = 10) => api.get('/dashboard/recent-activities', { params: { limit } }),
+  getRecentActivity: () => api.get('/dashboard/recent-activity'),
   
-  // 获取系统健康状态
-  getSystemHealth: () => api.get('/dashboard/system-health')
+  // 获取系统状态
+  getSystemStatus: () => api.get('/dashboard/system-status'),
+  
+  // 获取快速操作
+  getQuickActions: () => api.get('/dashboard/quick-actions'),
+  
+  // 获取性能指标
+  getPerformanceMetrics: () => api.get('/dashboard/performance-metrics')
 }
 
 export default api 

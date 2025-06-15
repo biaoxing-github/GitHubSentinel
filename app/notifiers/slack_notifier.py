@@ -9,7 +9,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import httpx
 
-from app.core.config import get_config
+from app.core.config import get_settings
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -19,8 +19,8 @@ class SlackNotifier:
     """Slack通知器"""
     
     def __init__(self):
-        self.config = get_config()
-        self.notification_config = self.config.notification
+        self.settings = get_settings()
+        self.notification_config = self.settings.notification
     
     async def send_message(
         self,

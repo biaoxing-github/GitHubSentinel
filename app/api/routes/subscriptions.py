@@ -117,7 +117,13 @@ async def update_subscription(subscription_id: int, subscription_data: Subscript
             monitor_discussions=subscription_data.monitor_discussions,
             exclude_authors=subscription_data.exclude_authors,
             include_labels=subscription_data.include_labels,
-            exclude_labels=subscription_data.exclude_labels
+            exclude_labels=subscription_data.exclude_labels,
+            notification_emails=subscription_data.notification_emails,
+            notification_slack_webhooks=subscription_data.notification_slack_webhooks,
+            notification_custom_webhooks=subscription_data.notification_custom_webhooks,
+            enable_email_notification=subscription_data.enable_email_notification,
+            enable_slack_notification=subscription_data.enable_slack_notification,
+            enable_webhook_notification=subscription_data.enable_webhook_notification
         )
         
         if not updated_subscription:

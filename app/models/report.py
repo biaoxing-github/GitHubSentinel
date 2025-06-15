@@ -12,6 +12,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.utils.timezone_utils import beijing_now
 
 
 class ReportType(str, Enum):
@@ -49,6 +50,7 @@ class Report(Base):
     # 报告基本信息
     title = Column(String(500), nullable=False, comment="报告标题")
     description = Column(Text, comment="报告描述")
+    repository = Column(String(200), comment="关联的仓库名称 (owner/repo)")
     report_type = Column(String(20), nullable=False, comment="报告类型")
     status = Column(String(20), default=ReportStatus.PENDING, comment="报告状态")
     format = Column(String(20), default=ReportFormat.HTML, comment="报告格式")
@@ -86,8 +88,8 @@ class Report(Base):
     retry_count = Column(Integer, default=0, comment="重试次数")
     
     # 时间戳
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), comment="更新时间")
+    created_at = Column(DateTime(timezone=True), default=beijing_now, comment="创建时间")
+    updated_at = Column(DateTime(timezone=True), onupdate=beijing_now, comment="更新时间")
     generated_at = Column(DateTime(timezone=True), comment="生成完成时间")
     
     # 关系
@@ -118,8 +120,8 @@ class ReportTemplate(Base):
     variables = Column(JSON, comment="模板变量定义（JSON）")
     
     # 时间戳
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), comment="更新时间")
+    created_at = Column(DateTime(timezone=True), default=beijing_now, comment="创建时间")
+    updated_at = Column(DateTime(timezone=True), onupdate=beijing_now, comment="更新时间")
     
     # 关系（如果有用户ID）
     user = relationship("User", foreign_keys=[user_id])
@@ -152,4 +154,5 @@ class TaskExecution(Base):
     log_data = Column(Text, comment="日志数据")
     
     # 时间戳
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间") 
+    created_at = Column(DateTime(timezone=True), default=beijing_now, comment="创建时间")
+    updated_at = Column(DateTime(timezone=True), onupdate=beijing_now, comment="更新时间") 

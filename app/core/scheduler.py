@@ -233,7 +233,7 @@ class TaskScheduler:
                 task_name=task_name,
                 task_type=task_type,
                 status="running",
-                started_at=datetime.utcnow()
+                started_at=datetime.now()
             )
             session.add(execution)
             await session.flush()
@@ -251,7 +251,7 @@ class TaskScheduler:
         async with get_db_session() as session:
             execution = await session.get(TaskExecution, execution_id)
             if execution:
-                now = datetime.utcnow()
+                now = datetime.now()
                 execution.status = "completed"
                 execution.completed_at = now
                 execution.duration_seconds = int((now - execution.started_at).total_seconds())
@@ -265,7 +265,7 @@ class TaskScheduler:
         async with get_db_session() as session:
             execution = await session.get(TaskExecution, execution_id)
             if execution:
-                now = datetime.utcnow()
+                now = datetime.now()
                 execution.status = "failed"
                 execution.completed_at = now
                 execution.duration_seconds = int((now - execution.started_at).total_seconds())
