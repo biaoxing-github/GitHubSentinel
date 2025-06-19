@@ -12,12 +12,27 @@
             <el-icon><Refresh /></el-icon>
             Refresh
           </el-button>
-          <el-button type="primary" @click="showGenerateDialog = true">
+          <el-button type="primary" @click="showGenerateDialog = true" :disabled="!!currentTaskId">
             <el-icon><Plus /></el-icon>
             Generate Report
           </el-button>
+          <el-button type="success" @click="startQuickAnalysis" :disabled="!!currentTaskId">
+            <el-icon><DataBoard /></el-icon>
+            Quick Analysis
+          </el-button>
         </div>
       </div>
+    </div>
+
+    <!-- 进度追踪区域 -->
+    <div v-if="currentTaskId" class="progress-section">
+      <ProgressTracker 
+        :task-id="currentTaskId"
+        :task-name="currentTaskName"
+        @task-completed="onTaskCompleted"
+        @task-failed="onTaskFailed"
+        @retry-task="onRetryTask"
+      />
     </div>
 
     <!-- 统计和过滤器 -->
@@ -366,9 +381,11 @@ import {
   Delete,
   MoreFilled,
   Calendar,
-  WarningFilled
+  WarningFilled,
+  DataBoard
 } from '@element-plus/icons-vue'
-import { reportsAPI, subscriptionAPI } from '@/api'
+import api, { reportsAPI, subscriptionAPI } from '@/api'
+import ProgressTracker from '@/components/ProgressTracker.vue'
 
 // 响应式数据
 const loading = ref(false)
@@ -395,6 +412,10 @@ const viewMode = ref('rendered')
 const filterType = ref('')
 const filterStatus = ref('')
 const searchQuery = ref('')
+
+// 进度追踪
+const currentTaskId = ref('')
+const currentTaskName = ref('')
 
 // 表单数据
 const generateForm = ref({
@@ -535,14 +556,24 @@ const generateReport = async () => {
     await generateFormRef.value.validate()
     generating.value = true
     
-    // 传递格式参数
-    await reportsAPI.generateReport({
-      subscription_id: generateForm.value.subscriptionId,
-      report_type: generateForm.value.reportType,
-      format: generateForm.value.format
+    // 获取选中的订阅信息
+    const selectedSubscription = subscriptions.value.find(sub => sub.id === generateForm.value.subscriptionId)
+    const repoName = selectedSubscription ? selectedSubscription.repository : 'unknown-repo'
+    
+    // 使用WebSocket API启动报告生成（带进度推送）
+    const response = await api.post('/websocket/generate-report', {
+      repo_name: repoName,
+      report_type: generateForm.value.reportType
     })
     
-    ElMessage.success('Report generation started')
+    console.log('报告生成API响应:', response)
+    
+    // 设置当前任务
+    const responseData = response.data || response
+    currentTaskId.value = responseData.task_id
+    currentTaskName.value = responseData.message || `生成报告: ${repoName} (${generateForm.value.reportType})`
+    
+    ElMessage.success('报告生成任务已启动，请查看进度')
     showGenerateDialog.value = false
     
     // 重置表单
@@ -553,17 +584,90 @@ const generateReport = async () => {
       description: ''
     }
     
-    // 重新加载报告列表和统计数据
-    setTimeout(() => {
-      loadReports()
-      loadReportStats()
-    }, 1000)
-    
   } catch (error) {
     console.error('Failed to generate report:', error)
-    ElMessage.error('Failed to generate report')
+    ElMessage.error('启动报告生成失败: ' + (error.response?.data?.detail || error.message))
   } finally {
     generating.value = false
+  }
+}
+
+// 进度追踪相关函数
+const startQuickAnalysis = async () => {
+  try {
+    const response = await api.post('/websocket/start-analysis', {
+      repo_name: 'demo-repository',
+      analysis_type: 'comprehensive'
+    })
+    
+    currentTaskId.value = response.data.task_id
+    currentTaskName.value = `AI分析: ${response.data.repo_name}`
+    
+    ElMessage.success('AI分析任务已启动')
+  } catch (error) {
+    console.error('启动AI分析失败:', error)
+    ElMessage.error('启动AI分析失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+const onTaskCompleted = (data) => {
+  ElMessage.success('任务完成!')
+  console.log('任务完成结果:', data)
+  
+  // 如果是报告生成任务，重新加载报告列表和统计
+  if (data.report) {
+    loadReports()
+    loadReportStats()
+    ElMessage({
+      message: '报告生成完成！已添加到报告列表',
+      type: 'success',
+      duration: 5000
+    })
+  }
+  
+  // 如果是AI分析任务，显示分析结果
+  if (data.analysis) {
+    ElMessage({
+      message: 'AI分析完成！请查看分析结果',
+      type: 'success',
+      duration: 5000
+    })
+  }
+  
+  // 清理任务状态
+  setTimeout(() => {
+    currentTaskId.value = ''
+    currentTaskName.value = ''
+  }, 3000)
+}
+
+const onTaskFailed = (message) => {
+  ElMessage.error(`任务失败: ${message}`)
+  // 清理任务状态
+  setTimeout(() => {
+    currentTaskId.value = ''
+    currentTaskName.value = ''
+  }, 2000)
+}
+
+const onRetryTask = async (taskId) => {
+  try {
+    if (taskId.startsWith('report_')) {
+      // 重新启动报告生成
+      const response = await api.post('/websocket/generate-report', {
+        repo_name: 'demo-repository',
+        report_type: 'monthly'
+      })
+      currentTaskId.value = response.data.task_id
+      currentTaskName.value = response.data.message
+    } else if (taskId.startsWith('analysis_')) {
+      // 重新启动AI分析
+      await startQuickAnalysis()
+    }
+    
+    ElMessage.success('任务已重新启动')
+  } catch (error) {
+    ElMessage.error('重新启动任务失败: ' + (error.response?.data?.detail || error.message))
   }
 }
 
@@ -1147,6 +1251,10 @@ onMounted(() => {
   max-height: 600px;
   overflow-y: auto;
   border: 1px solid var(--border-color);
+}
+
+.progress-section {
+  margin-bottom: var(--space-6);
 }
 
 .markdown-content {

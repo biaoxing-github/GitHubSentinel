@@ -15,8 +15,9 @@
           </div>
           
           <nav class="main-navigation">
+            <!-- 主要页面 -->
             <router-link 
-              v-for="item in navigationItems" 
+              v-for="item in mainNavigationItems" 
               :key="item.path"
               :to="item.path" 
               class="nav-item"
@@ -27,6 +28,44 @@
               </el-icon>
               <span>{{ item.label }}</span>
             </router-link>
+            
+            <!-- 监控工具下拉菜单 -->
+            <el-dropdown trigger="hover" class="nav-dropdown">
+              <span class="nav-item dropdown-trigger">
+                <el-icon><Monitor /></el-icon>
+                <span class="nav-text">Monitoring</span>
+                <el-icon class="arrow-icon"><ArrowDown /></el-icon>
+              </span>
+              <template #dropdown>
+                <el-dropdown-menu class="nav-dropdown-menu">
+                  <el-dropdown-item v-for="tool in monitoringTools" :key="tool.path" @click="navigateTo(tool.path)">
+                    <div class="dropdown-link">
+                      <el-icon><component :is="tool.icon" /></el-icon>
+                      <span>{{ tool.label }}</span>
+                    </div>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+            
+            <!-- AI助手下拉菜单 -->
+            <el-dropdown trigger="hover" class="nav-dropdown">
+              <span class="nav-item dropdown-trigger">
+                <el-icon><ChatDotRound /></el-icon>
+                <span class="nav-text">AI Assistant</span>
+                <el-icon class="arrow-icon"><ArrowDown /></el-icon>
+              </span>
+              <template #dropdown>
+                <el-dropdown-menu class="nav-dropdown-menu">
+                  <el-dropdown-item v-for="ai in aiTools" :key="ai.path" @click="navigateTo(ai.path)">
+                    <div class="dropdown-link">
+                      <el-icon><component :is="ai.icon" /></el-icon>
+                      <span>{{ ai.label }}</span>
+                    </div>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </nav>
           
           <div class="header-actions">
@@ -69,7 +108,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { 
   Monitor, 
   House, 
@@ -77,16 +116,38 @@ import {
   Document, 
   Setting, 
   Bell, 
-  User 
+  User,
+  Connection,
+  Notification,
+  DataBoard,
+  ChatDotRound,
+  ArrowDown
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
+const router = useRouter()
 
-const navigationItems = ref([
+// 主要导航项
+const mainNavigationItems = ref([
   { path: '/', label: 'Dashboard', icon: 'House' },
   { path: '/subscriptions', label: 'Subscriptions', icon: 'Star' },
   { path: '/reports', label: 'Reports', icon: 'Document' },
+  { path: '/profile', label: 'Profile', icon: 'User' },
   { path: '/settings', label: 'Settings', icon: 'Setting' }
+])
+
+// 监控工具分组
+const monitoringTools = ref([
+  { path: '/websocket-monitor', label: 'WebSocket Monitor', icon: 'Connection' },
+  { path: '/notification-rules', label: 'Notifications', icon: 'Notification' },
+  { path: '/system-monitor', label: 'System Monitor', icon: 'DataBoard' }
+])
+
+// AI助手工具分组
+const aiTools = ref([
+  { path: '/chat', label: 'AI Chat', icon: 'ChatDotRound' },
+  { path: '/chat?mode=analysis', label: 'Smart Analysis', icon: 'DataBoard' },
+  { path: '/chat?mode=report', label: 'Report Generator', icon: 'Document' }
 ])
 
 const isActiveRoute = (path) => {
@@ -94,6 +155,10 @@ const isActiveRoute = (path) => {
     return route.path === '/'
   }
   return route.path.startsWith(path)
+}
+
+const navigateTo = (path) => {
+  router.push(path)
 }
 </script>
 
@@ -255,6 +320,99 @@ html, body {
         .el-icon {
           font-size: 16px;
         }
+      }
+      
+      .nav-dropdown {
+        .dropdown-trigger {
+          cursor: pointer;
+          transition: all 0.3s ease;
+          
+          &:hover {
+            background: var(--bg-hover);
+            color: var(--primary-600);
+            
+            .arrow-icon {
+              transform: rotate(180deg);
+            }
+          }
+          
+          .arrow-icon {
+            font-size: 12px;
+            margin-left: var(--space-1);
+            transition: transform 0.3s ease;
+          }
+        }
+      }
+    }
+    
+    .nav-text {
+      display: inline-block;
+    }
+    
+    @media (max-width: 768px) {
+      .nav-text {
+        display: none;
+      }
+    }
+    
+    // 美化下拉菜单
+    .nav-dropdown-menu {
+      margin-top: var(--space-1);
+      border: 1px solid var(--border-color);
+      border-radius: var(--border-radius-lg);
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+      background: var(--bg-card);
+      min-width: 200px;
+      padding: var(--space-2);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      
+      .dropdown-link {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        width: 100%;
+        color: var(--text-secondary);
+        text-decoration: none;
+        padding: var(--space-3) var(--space-4);
+        border-radius: var(--border-radius);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        cursor: pointer;
+        font-weight: 500;
+        font-size: 0.875rem;
+        
+        &:hover {
+          color: var(--primary-600);
+          background: linear-gradient(135deg, var(--primary-50), var(--primary-100));
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(64, 158, 255, 0.15);
+        }
+        
+        .el-icon {
+          font-size: 18px;
+          color: var(--primary-500);
+          transition: all 0.3s ease;
+        }
+        
+        span {
+          font-weight: 600;
+          letter-spacing: 0.025em;
+        }
+      }
+    }
+    
+    // 确保下拉菜单项正确显示
+    :deep(.el-dropdown-menu__item) {
+      padding: 0 !important;
+      margin: 2px 4px;
+      border-radius: var(--border-radius-sm);
+      
+      &:hover {
+        background: transparent !important;
+      }
+      
+      &:focus {
+        background: transparent !important;
       }
     }
     

@@ -7,7 +7,7 @@ import axios from 'axios'
 // 创建 axios 实例
 const api = axios.create({
   baseURL: '/api/v1',  // 使用相对路径，通过Vite代理访问后端
-  timeout: 10000,
+  timeout: 60 * 60 * 1000, // 60分钟超时（3600000ms）
   headers: {
     'Content-Type': 'application/json'
   },
@@ -17,7 +17,8 @@ const api = axios.create({
 // 请求拦截器
 api.interceptors.request.use(
   (config) => {
-    // 可以在这里添加认证token等
+    // 添加默认的Authorization头
+    config.headers.Authorization = 'Bearer demo_token'
     return config
   },
   (error) => {

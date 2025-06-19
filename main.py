@@ -61,6 +61,17 @@ def create_app() -> FastAPI:
     # 注册路由
     app.include_router(api_router, prefix="/api/v1")
     
+    # 注册v0.3.0新增路由
+    from app.api.routes.llm import router as llm_router
+    from app.api.routes.websocket import router as websocket_router  
+    from app.api.routes.pwa import router as pwa_router
+    from app.api.routes.system_monitor import router as system_router
+    
+    app.include_router(llm_router, prefix="/api/v1")
+    app.include_router(websocket_router, prefix="/api/v1")
+    app.include_router(pwa_router, prefix="/api/v1")
+    app.include_router(system_router, prefix="/api/v1")
+    
     # 添加异常处理器
     @app.exception_handler(404)
     async def not_found_handler(request, exc):

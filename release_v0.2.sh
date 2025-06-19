@@ -44,7 +44,7 @@ git commit -m "feat: Release v0.2 - Enhanced Dashboard and Email Notifications
 
 # 创建版本标签
 echo "🏷️  创建版本标签 v0.2..."
-git tag -a v0.2 -m "GitHubSentinel v0.2 - Enhanced Dashboard and Email Notifications
+git tag -a v0.2.0 -m "GitHubSentinel v0.2 - Enhanced Dashboard and Email Notifications
 
 主要更新:
 ✅ 前端时间显示北京时间
@@ -58,8 +58,8 @@ git tag -a v0.2 -m "GitHubSentinel v0.2 - Enhanced Dashboard and Email Notificat
 
 # 推送到远程仓库
 echo "🌐 推送到远程仓库..."
-git push origin main
-git push origin v0.2
+git push origin master
+git push origin v0.2.0
 
 echo "✅ GitHubSentinel v0.2 发布完成!"
 echo "📝 请查看 RELEASE_NOTES.md 了解详细更新内容"
